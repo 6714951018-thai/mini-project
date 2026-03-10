@@ -101,7 +101,7 @@ def analyze_text(text: str) -> dict:
     
     # แก้ไขชื่อโมเดลเป็น gemini-1.5-flash (เสถียรและเร็วที่สุดสำหรับงานนี้)
     model = genai.GenerativeModel(
-        model_name='gemini-1.5-flash',
+        model_name='models/gemini-1.5-flash',
         generation_config={"response_mime_type": "application/json"}
     )
 
