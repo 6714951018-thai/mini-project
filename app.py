@@ -2,6 +2,7 @@ import streamlit as st
 import google.generativeai as genai
 import json
 import plotly.graph_objects as go
+import os  # เพิ่มการ import os เพื่อดึงค่าจาก Environment Variables ของ Render
 
 # ==========================================
 # 1. PAGE CONFIGURATION & CUSTOM CSS
@@ -13,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for a modern, clean look (adapts to light/dark themes)
+# Custom CSS for a modern, clean look
 st.markdown("""
     <style>
     .stTextArea textarea {
@@ -49,11 +50,10 @@ def get_emotion_emoji(emotion: str) -> str:
     if any(e in emotion for e in['anxious', 'nervous', 'worry', 'fear', 'scared']): return "😰"
     if any(e in emotion for e in ['love', 'affection', 'caring']): return "🥰"
     if any(e in emotion for e in ['neutral', 'calm', 'indifferent']): return "😐"
-    return "🧠"  # Default
+    return "🧠"
 
 def create_donut_chart(score: int):
     """Generate a modern Plotly donut chart for the Happiness Score."""
-    # Determine color based on score
     color = "#4CAF50" if score >= 60 else "#FFC107" if score >= 40 else "#F44336"
     
     fig = go.Figure(data=[go.Pie(
@@ -84,55 +84,56 @@ def create_donut_chart(score: int):
 # ==========================================
 def analyze_text(text: str) -> dict:
     """Send text to Gemini and return the structured JSON response."""
-    # Fetch API key from Streamlit Secrets
+    # แก้ไขส่วนนี้: พยายามดึง API Key จาก Streamlit Secrets ก่อน ถ้าไม่เจอให้ดึงจาก os.environ (สำหรับ Render)
+    api_key = None
     try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    except KeyError:
-        raise ValueError("API Key not found. Please set GEMINI_API_KEY in Streamlit Secrets.")
+        if "GEMINI_API_KEY" in st.secrets:
+            api_key = st.secrets["GEMINI_API_KEY"]
+        else:
+            api_key = os.environ.get("GEMINI_API_KEY")
+    except Exception:
+        api_key = os.environ.get("GEMINI_API_KEY")
+
+    if not api_key:
+        raise ValueError("API Key not found. Please set GEMINI_API_KEY in Render Environment Variables or Streamlit Secrets.")
 
     genai.configure(api_key=api_key)
     
-    # Using gemini-1.5-flash as requested for fast, cost-effective multimodal reasoning
+    # แก้ไขชื่อโมเดลเป็น gemini-1.5-flash (เสถียรและเร็วที่สุดสำหรับงานนี้)
     model = genai.GenerativeModel(
-        model_name='gemini-2.5-flash',
-        # Force JSON output format at the API level
+        model_name='gemini-1.5-flash',
         generation_config={"response_mime_type": "application/json"}
     )
 
     prompt = f"""
     You are an expert AI Sentiment and Emotion Analyzer.
-    Analyze the sentiment and emotion of the following text (which could be in English or Thai).
-    Provide the output strictly as a JSON object matching this schema:
+    Analyze the sentiment and emotion of the following text (English or Thai).
+    Return ONLY a JSON object:
     {{
-        "emotion": "Single word describing the primary emotion in English (e.g., Happy, Sad, Angry, Anxious)",
-        "score": integer from 0 to 100 representing the happiness/positivity score (100 = perfectly happy),
-        "summary": "Short summary of the text in Thai",
-        "suggestion": "A helpful suggestion or empathetic response based on the text in Thai",
+        "emotion": "Single word (English)",
+        "score": integer (0-100),
+        "summary": "Short summary (Thai)",
+        "suggestion": "Empathetic response (Thai)",
         "intensity": "Low, Medium, or High"
     }}
 
-    Text to analyze:
-    "{text}"
+    Text: "{text}"
     """
     
     response = model.generate_content(prompt)
     
-    # Parse the JSON response safely
     try:
-        data = json.loads(response.text)
-        return data
+        return json.loads(response.text)
     except json.JSONDecodeError:
-        # Fallback if the model hallucinated non-JSON despite configurations
-        raise ValueError("The AI model returned an improperly formatted response. Please try again.")
+        raise ValueError("AI returned invalid JSON format. Please try again.")
 
 # ==========================================
 # 4. STREAMLIT UI LAYOUT
 # ==========================================
 st.title("✨ AI Sentiment & Emotion Analyzer")
-st.markdown("Enter a message in **English** or **Thai** below. The AI will analyze the underlying emotion, provide a happiness score, summarize your text, and give you a helpful suggestion.")
+st.markdown("Enter a message in **English** or **Thai** below.")
 
-# Text Input Area
-user_text = st.text_area("What's on your mind?", height=150, placeholder="E.g., I just got promoted today, but I'm feeling overwhelmed by the new responsibilities... / วันนี้รู้สึกเหนื่อยจังเลย งานเยอะมาก...")
+user_text = st.text_area("What's on your mind?", height=150, placeholder="วันนี้รู้สึกเหนื่อยจังเลย งานเยอะมาก...")
 
 if st.button("Analyze Emotion 🚀", type="primary", use_container_width=True):
     if not user_text.strip():
@@ -140,10 +141,8 @@ if st.button("Analyze Emotion 🚀", type="primary", use_container_width=True):
     else:
         with st.spinner("🧠 AI is analyzing your thoughts..."):
             try:
-                # 1. Call API
                 result = analyze_text(user_text)
                 
-                # Extract values with safe fallbacks
                 emotion = result.get("emotion", "Unknown")
                 score = int(result.get("score", 50))
                 summary = result.get("summary", "ไม่มีสรุป")
@@ -153,10 +152,8 @@ if st.button("Analyze Emotion 🚀", type="primary", use_container_width=True):
                 st.divider()
                 st.subheader("📊 Analysis Results")
 
-                # 2. Layout Results visually
                 col1, col2 = st.columns([1, 2])
 
-                # Left Column: Emoji, Emotion, and Donut Chart
                 with col1:
                     emoji = get_emotion_emoji(emotion)
                     st.markdown(f'<div class="emotion-emoji">{emoji}</div>', unsafe_allow_html=True)
@@ -166,9 +163,7 @@ if st.button("Analyze Emotion 🚀", type="primary", use_container_width=True):
                     fig = create_donut_chart(score)
                     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
-                # Right Column: Summary, Suggestions, and Metrics
                 with col2:
-                    # Metrics row
                     m1, m2 = st.columns(2)
                     m1.metric(label="Detected Emotion", value=emotion)
                     m2.metric(label="Emotional Intensity", value=intensity)
@@ -179,8 +174,5 @@ if st.button("Analyze Emotion 🚀", type="primary", use_container_width=True):
                     st.markdown("### 💡 AI Suggestion (คำแนะนำ)")
                     st.success(suggestion, icon="✨")
 
-            # Error Handling Block
-            except ValueError as e:
-                st.error(f"Configuration/Parsing Error: {str(e)}")
             except Exception as e:
-                st.error(f"An unexpected API error occurred: {str(e)}")
+                st.error(f"Error: {str(e)}")
